@@ -1,0 +1,1266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Procedural 3D Wonderland - Boss Fight Edition</title>
+    <style>
+        /* Basic CSS Reset */
+        body {
+            margin: 0;
+            overflow: hidden; /* Prevent scrollbars */
+            font-family: sans-serif;
+            background-color: #000; /* Explicit black background */
+        }
+
+        /* Style for the container where the 3D scene will live */
+        #world-container {
+            width: 100vw;
+            height: 100vh;
+            display: block;
+            cursor: pointer; /* Indicate clickability for pointer lock */
+        }
+
+        /* Simple overlay for instructions/info */
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            background-color: rgba(0, 0, 0, 0.6);
+            padding: 15px;
+            border-radius: 8px;
+            font-size: 14px;
+            line-height: 1.5;
+            max-width: 300px;
+            z-index: 3; /* Below blocker/loading */
+        }
+
+         /* Style for the loading indicator */
+         #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-size: 24px;
+            background-color: rgba(0,0,0,0.8); /* Darker */
+            padding: 20px;
+            border-radius: 10px;
+            z-index: 10; /* Ensure it's above other elements */
+            display: block; /* Explicitly visible initially */
+        }
+
+        /* Crosshair for FPS mode */
+        #crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 10px;
+            height: 10px;
+            border: 2px solid white;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            mix-blend-mode: difference; /* Helps visibility */
+            pointer-events: none; /* Don't interfere with clicks */
+            display: none; /* Hidden until pointer lock */
+            z-index: 5;
+        }
+
+        /* Blocker screen when pointer is not locked */
+        #blocker {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.7); /* Slightly darker */
+            display: flex; /* Use flex to center content */
+            justify-content: center;
+            align-items: center;
+            z-index: 9; /* Below loading, above info/canvas */
+            /* Initially shown */
+        }
+
+        #instructions {
+            width: 50%;
+            max-width: 400px;
+            background-color: rgba(30,30,30,0.85); /* More opaque */
+            color: white;
+            padding: 30px;
+            border-radius: 10px;
+            text-align: center;
+            font-size: 18px;
+        }
+         #instructions h2 {
+            margin-top: 0;
+         }
+
+        /* --- UI Elements --- */
+        .health-bar-container {
+            position: absolute;
+            width: 250px;
+            height: 25px;
+            background-color: rgba(50, 50, 50, 0.7);
+            border: 2px solid #ccc;
+            border-radius: 5px;
+            padding: 2px;
+            box-sizing: border-box;
+             display: none; /* Hidden by default */
+             z-index: 6;
+        }
+        .health-bar-fill {
+            height: 100%;
+            background-color: red;
+            border-radius: 3px;
+            width: 100%; /* Start full */
+            transition: width 0.2s ease-out; /* Smooth transition */
+        }
+         .health-bar-text {
+             position: absolute;
+             top: 0;
+             left: 0;
+             width: 100%;
+             height: 100%;
+             text-align: center;
+             color: white;
+             font-size: 14px;
+             line-height: 21px; /* Vertically center in 25px bar (25 - 2*border - 2*padding)*/
+             font-weight: bold;
+             text-shadow: 1px 1px 2px black;
+             pointer-events: none; /* Don't block clicks */
+         }
+
+        #player-health-bar {
+            bottom: 20px;
+            left: 20px;
+            display: block; /* Player health always visible */
+        }
+        #player-health-bar .health-bar-fill {
+            background-color: #4CAF50; /* Green */
+        }
+
+
+        #boss-health-bar {
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            /* Initially hidden via display: none in base class */
+        }
+        #boss-health-bar .health-bar-fill {
+            background-color: #dc143c; /* Crimson */
+        }
+
+    </style>
+</head>
+<body>
+    <!-- Loading indicator -->
+    <div id="loading">Loading World... Please Wait</div>
+
+    <!-- Blocker screen -->
+    <div id="blocker">
+        <div id="instructions">
+            <h2>Click to Play</h2>
+            <p>W, A, S, D: Move<br/>SPACE: Jump<br/>MOUSE: Look Around<br/>LEFT CLICK: Shoot / Interact<br/>ESC: Release Mouse</p>
+            <p>Defeat the DRAGON!</p>
+            <p>(Click the screen to start)</p>
+        </div>
+    </div>
+
+    <!-- Container for the Three.js canvas -->
+    <div id="world-container"></div>
+
+    <!-- Informational text overlay -->
+    <div id="info">
+        Procedural 3D Wonderland - Boss Fight!<br/>
+        Find and defeat the Dragon!<br/>
+        Shoot: Left Click
+    </div>
+
+    <!-- Crosshair -->
+    <div id="crosshair"></div>
+
+    <!-- Player Health Bar -->
+    <div id="player-health-bar" class="health-bar-container">
+        <div id="player-health-fill" class="health-bar-fill"></div>
+        <div id="player-health-text" class="health-bar-text">Player HP: 100/100</div>
+    </div>
+
+    <!-- Boss Health Bar -->
+    <div id="boss-health-bar" class="health-bar-container">
+        <div id="boss-health-fill" class="health-bar-fill"></div>
+        <div id="boss-health-text" class="health-bar-text">Dragon HP: ???/???</div>
+    </div>
+
+
+    <!-- JavaScript Section -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.skypack.dev/three@0.132.2",
+                "three/addons/": "https://cdn.skypack.dev/three@0.132.2/examples/jsm/"
+            }
+        }
+    </script>
+    <script type="module">
+        // Import necessary Three.js components
+        import * as THREE from 'three';
+        import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+        // Import noise library for procedural generation
+        import SimplexNoise from 'https://cdn.skypack.dev/simplex-noise@3.0.0';
+
+        // --- Global Variables ---
+        let scene, camera, renderer, controls;
+        let clock;
+        let simplex; // Noise generator instance
+        const interactiveObjects = []; // Array to store clickable objects
+        const worldObjects = []; // Array to store all world blocks for collision
+        const mobs = []; // Array to store mob data
+        let directionalLight, ambientLight;
+        let pointLight1, pointLight2; // Dynamic lights
+        let particleSystem; // For whimsical effects
+        let bossData = null; // Holds the single boss instance { mesh, health, maxHealth, ... }
+        let isBossSpawned = false; // Flag to control boss spawning
+
+        // --- Player Variables (FPS) ---
+        const playerHeight = 1.8;
+        const playerRadius = 0.4;
+        const playerSpeed = 8.0;
+        const jumpVelocity = 8.0;
+        const gravity = 20.0;
+        let playerVelocity = new THREE.Vector3();
+        let playerDirection = new THREE.Vector3();
+        let moveForward = false;
+        let moveBackward = false;
+        let moveLeft = false;
+        let moveRight = false;
+        let canJump = false;
+        let playerOnGround = false;
+        let playerMaxHealth = 100;
+        let playerHealth = playerMaxHealth;
+        let playerDamageCooldown = 0; // Cooldown timer after taking damage
+        const playerDamageCooldownTime = 1.0; // Seconds between taking damage from boss
+
+        // --- Combat Variables ---
+        const gunDamage = 10;
+        const gunRange = 100;
+
+        // --- Boss Variables ---
+        const bossMaxHealth = 500;
+        const bossContactDamage = 15;
+        const bossContactRadiusSq = Math.pow(2.5, 2); // Squared radius for proximity check
+
+        // --- World Parameters ---
+        const worldWidth = 48;
+        const worldDepth = 48;
+        const cubeSize = 1;
+        const heightScale = 15;
+        const noiseScale = 0.07;
+        const floatingIslandThreshold = 0.65;
+        const floatingIslandElevation = 25;
+        const portalSpawnChance = 0.008;
+        const mobSpawnChance = 0.004; // Slightly lower mob chance
+        const villageSpawnThreshold = 0.3;
+        const villageDensity = 0.05;
+        const bossSpawnChance = 1.0; // Will spawn exactly one boss if flag is true
+
+        // Raycasters
+        let downRaycaster = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(0, -1, 0), 0, playerHeight / 2 + 0.1);
+        let collisionRaycaster = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(), 0, playerRadius + 0.1);
+        let shootingRaycaster = new THREE.Raycaster();
+
+        // DOM Elements Cache
+        let blocker, instructions, crosshair, loadingIndicator, worldContainer;
+        let playerHealthBar, playerHealthFill, playerHealthText;
+        let bossHealthBar, bossHealthFill, bossHealthText;
+
+        // --- Initialization ---
+        function init() {
+            console.log("init() called");
+
+            // Cache DOM Elements
+            blocker = document.getElementById('blocker');
+            instructions = document.getElementById('instructions');
+            crosshair = document.getElementById('crosshair');
+            loadingIndicator = document.getElementById('loading');
+            worldContainer = document.getElementById('world-container');
+            playerHealthBar = document.getElementById('player-health-bar');
+            playerHealthFill = document.getElementById('player-health-fill');
+            playerHealthText = document.getElementById('player-health-text');
+            bossHealthBar = document.getElementById('boss-health-bar');
+            bossHealthFill = document.getElementById('boss-health-fill');
+            bossHealthText = document.getElementById('boss-health-text');
+
+            if (!blocker || !instructions || !crosshair || !loadingIndicator || !worldContainer || !playerHealthBar || !bossHealthBar) {
+                 console.error("DOM elements not found! Check IDs.");
+                 document.body.innerHTML = '<h1 style="color:red; text-align:center; margin-top: 50px;">Error: Could not find required HTML elements. Check IDs like #blocker, #loading, health bars etc.</h1>';
+                 return;
+             }
+
+            clock = new THREE.Clock();
+
+            try {
+                simplex = new SimplexNoise();
+            } catch (error) {
+                console.error("Failed to initialize SimplexNoise:", error);
+                loadingIndicator.textContent = "Error loading noise library.";
+                return;
+            }
+
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87CEEB);
+            scene.fog = new THREE.Fog(0x87CEEB, 60, 180);
+
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+
+            try {
+                renderer = new THREE.WebGLRenderer({ antialias: true });
+                renderer.setSize(window.innerWidth, window.innerHeight);
+                renderer.shadowMap.enabled = true;
+                renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+                worldContainer.appendChild(renderer.domElement);
+            } catch (error) {
+                 console.error("Failed to create WebGLRenderer:", error);
+                 loadingIndicator.textContent = "Error creating WebGL context.";
+                 blocker.style.display = 'none';
+                 return;
+            }
+
+            // --- DEBUG CUBE (Optional) ---
+            // const debugGeometry = new THREE.BoxGeometry(1, 1, 1);
+            // const debugMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+            // const debugCube = new THREE.Mesh(debugGeometry, debugMaterial);
+            // debugCube.position.set(0, playerHeight, -5);
+            // scene.add(debugCube);
+            // --- END DEBUG CUBE ---
+
+            try {
+                controls = new PointerLockControls(camera, document.body);
+                scene.add(controls.getObject());
+            } catch (error) {
+                console.error("Failed to create PointerLockControls:", error);
+                 loadingIndicator.textContent = "Error initializing controls.";
+                 blocker.style.display = 'none';
+                 return;
+            }
+
+            // Pointer Lock Event Listeners
+            instructions.addEventListener('click', () => controls.lock() );
+            controls.addEventListener('lock', () => {
+                instructions.style.display = 'none';
+                blocker.style.display = 'none';
+                crosshair.style.display = 'block';
+            });
+            controls.addEventListener('unlock', () => {
+                blocker.style.display = 'flex';
+                instructions.style.display = '';
+                crosshair.style.display = 'none';
+            });
+
+            document.addEventListener('keydown', onKeyDown);
+            document.addEventListener('keyup', onKeyUp);
+
+            // Lighting
+            ambientLight = new THREE.AmbientLight(0xcccccc, 0.6);
+            scene.add(ambientLight);
+            directionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
+            directionalLight.position.set(80, 100, 60);
+            directionalLight.castShadow = true;
+            directionalLight.shadow.mapSize.width = 2048;
+            directionalLight.shadow.mapSize.height = 2048;
+            directionalLight.shadow.camera.near = 0.5;
+            directionalLight.shadow.camera.far = 300;
+            const shadowCamSize = Math.max(worldWidth, worldDepth) * cubeSize * 0.7;
+            directionalLight.shadow.camera.left = -shadowCamSize;
+            directionalLight.shadow.camera.right = shadowCamSize;
+            directionalLight.shadow.camera.top = shadowCamSize;
+            directionalLight.shadow.camera.bottom = -shadowCamSize;
+            scene.add(directionalLight);
+
+            // Dynamic Point Lights
+            pointLight1 = new THREE.PointLight(0xff44ff, 1.5, 80); pointLight1.castShadow = false; scene.add(pointLight1);
+            pointLight2 = new THREE.PointLight(0x44ffff, 1.5, 80); pointLight2.castShadow = false; scene.add(pointLight2);
+
+            // Generate World, Villages, Mobs, and Boss
+            try {
+                 generateWorldAndFeatures(); // Now includes boss logic
+            } catch (error) {
+                 console.error("Error during world generation:", error);
+                 loadingIndicator.textContent = "Error generating world.";
+                 blocker.style.display = 'none';
+                 return;
+            }
+
+            // Particle Effects
+            try { generateParticles(); }
+            catch(error){ console.warn("Could not generate particles:", error); }
+
+            // Initial Player Position
+            try { setInitialPlayerPosition(); }
+            catch (error) {
+                 console.error("Error setting initial player position:", error);
+                 controls.getObject().position.set(0, playerHeight + 5, 0);
+            }
+
+            // Event Listeners
+            window.addEventListener('resize', onWindowResize);
+            // Use mousedown for shooting/interacting to allow holding button
+            window.addEventListener('mousedown', onInteractClick);
+
+            // Initialize UI
+            updatePlayerHealthUI();
+            updateBossHealthUI(); // Will hide if boss doesn't exist
+
+            loadingIndicator.style.display = 'none';
+            animate();
+            console.log("init() finished successfully.");
+        }
+
+        // --- Materials Cache ---
+        const materials = {
+            grass: new THREE.MeshStandardMaterial({ color: 0x55aa55 }),
+            dirt: new THREE.MeshStandardMaterial({ color: 0x8b4513 }),
+            stone: new THREE.MeshStandardMaterial({ color: 0x808080 }),
+            sand: new THREE.MeshStandardMaterial({ color: 0xf4a460 }),
+            water: new THREE.MeshStandardMaterial({ color: 0x4682b4, opacity: 0.75, transparent: true }),
+            snow: new THREE.MeshStandardMaterial({ color: 0xffffff }),
+            magic: new THREE.MeshStandardMaterial({ color: 0xff69b4, emissive: 0xaa00aa }),
+            portal: new THREE.MeshStandardMaterial({ color: 0xffff00, emissive: 0xaaaa00, emissiveIntensity: 2.5 }),
+            wood: new THREE.MeshStandardMaterial({ color: 0x966F33 }),
+            roof: new THREE.MeshStandardMaterial({ color: 0x654321 }),
+            mob: new THREE.MeshStandardMaterial({ color: 0xff0000, emissive: 0x550000 }),
+            // Boss Material
+            dragon: new THREE.MeshStandardMaterial({ color: 0x330066, emissive: 0x1a0033, roughness: 0.3, metalness: 0.2 }) // Dark Purple Dragon
+        };
+
+        // --- Geometries Cache ---
+        const geometries = {
+            cube: new THREE.BoxGeometry(cubeSize, cubeSize, cubeSize),
+            mob: new THREE.SphereGeometry(cubeSize * 0.4, 8, 8),
+            // Boss Geometry (Simple large sphere for now)
+            dragonBody: new THREE.SphereGeometry(cubeSize * 2.5, 16, 12), // Larger, more detailed sphere
+            // Could add more parts later (head, wings using more spheres/boxes)
+        };
+
+
+        // --- World, Village, Mob, and BOSS Generation ---
+        function generateWorldAndFeatures() {
+            console.log("Generating world, villages, mobs, and potentially a boss...");
+
+            const heightMap = new Array(worldWidth).fill(0).map(() => new Array(worldDepth).fill(-Infinity));
+            const terrainTypeMap = new Array(worldWidth).fill(0).map(() => new Array(worldDepth).fill(null));
+            const validSpawnLocations = []; // Store {x, y, z} of valid ground blocks
+
+            // **Pass 1: Generate Terrain and Collect Data**
+            console.log("Generation Pass 1: Terrain");
+            let blockCount = 0;
+            for (let x = 0; x < worldWidth; x++) {
+                for (let z = 0; z < worldDepth; z++) {
+                    const nx = x * noiseScale;
+                    const nz = z * noiseScale;
+                    let yNoise = simplex.noise2D(nx, nz);
+                    let featureNoise = simplex.noise2D(nx * 0.5 + 100, nz * 0.5 + 150);
+                    let magicNoise = simplex.noise2D(nx * 2 + 200, nz * 2 + 300);
+
+                    let terrainHeight = Math.floor(((yNoise + 1) / 2) * heightScale);
+                    let baseHeight = terrainHeight;
+                    let topMaterial = materials.grass;
+                    let isWater = false;
+
+                    // Determine block type based on height
+                    if (baseHeight < heightScale * 0.2) { topMaterial = materials.water; baseHeight = Math.floor(heightScale * 0.2) - 1; isWater = true; }
+                    else if (baseHeight < heightScale * 0.3) topMaterial = materials.sand;
+                    else if (baseHeight < heightScale * 0.7) topMaterial = materials.grass;
+                    else if (baseHeight < heightScale * 0.9) topMaterial = materials.stone;
+                    else topMaterial = materials.snow;
+                    if (!isWater && magicNoise > 0.75) { topMaterial = materials.magic; baseHeight += 1; }
+
+                    heightMap[x][z] = baseHeight;
+                    terrainTypeMap[x][z] = topMaterial;
+
+                    // Build column
+                    for (let h = 0; h <= baseHeight; h++) {
+                        let currentMaterial;
+                        if (h === baseHeight) { if (isWater) continue; currentMaterial = topMaterial; }
+                        else if (h > baseHeight - 3) currentMaterial = materials.dirt;
+                        else currentMaterial = materials.stone;
+                        if (isWater && h < baseHeight) currentMaterial = materials.sand;
+
+                        const cube = new THREE.Mesh(geometries.cube, currentMaterial);
+                        const blockX = (x - worldWidth / 2) * cubeSize;
+                        const blockY = h * cubeSize - heightScale / 2;
+                        const blockZ = (z - worldDepth / 2) * cubeSize;
+                        cube.position.set(blockX, blockY, blockZ);
+                        cube.castShadow = true; cube.receiveShadow = true;
+                        cube.userData = { type: 'terrain', gridX: x, gridZ: z, gridY: h };
+
+                        // Check for Portals
+                        if (h === baseHeight && !isWater && topMaterial !== materials.magic && Math.random() < portalSpawnChance) {
+                            cube.material = materials.portal;
+                            cube.userData = { isPortal: true, originalColor: materials.portal.color.getHex(), type: 'interactive', gridX: x, gridZ: z, gridY: h };
+                            interactiveObjects.push(cube);
+                        }
+
+                        scene.add(cube); worldObjects.push(cube); blockCount++;
+
+                        // Store valid spawn locations (top non-water/magic blocks)
+                        if (h === baseHeight && !isWater && topMaterial !== materials.magic) {
+                             validSpawnLocations.push({x: blockX, y: blockY + cubeSize, z: blockZ }); // Position slightly above the block
+                        }
+                    }
+
+                    // Floating Islands
+                    if (featureNoise > floatingIslandThreshold) {
+                        let islandHeight = baseHeight + floatingIslandElevation + Math.floor((featureNoise - floatingIslandThreshold) * 12);
+                        let islandTopMaterial = (Math.random() < 0.5) ? materials.magic : materials.grass;
+                        let islandBaseMaterial = materials.stone;
+                        for (let fh = islandHeight - Math.floor(Math.random() * 4 + 2) ; fh <= islandHeight; fh++) {
+                            const floatingCube = new THREE.Mesh(geometries.cube, fh === islandHeight ? islandTopMaterial : islandBaseMaterial);
+                             const blockX = (x - worldWidth / 2) * cubeSize;
+                             const blockY = fh * cubeSize - heightScale / 2;
+                             const blockZ = (z - worldDepth / 2) * cubeSize;
+                             floatingCube.position.set(blockX, blockY, blockZ);
+                             floatingCube.castShadow = true; floatingCube.receiveShadow = true;
+                             floatingCube.userData = { type: 'terrain', gridX: x, gridZ: z, gridY: fh, isFloating: true };
+
+                            if (fh === islandHeight && Math.random() < portalSpawnChance * 2.5) {
+                                floatingCube.material = materials.portal;
+                                floatingCube.userData = { isPortal: true, originalColor: materials.portal.color.getHex(), type: 'interactive', gridX: x, gridZ: z, gridY: fh, isFloating: true };
+                                interactiveObjects.push(floatingCube);
+                             }
+                             scene.add(floatingCube); worldObjects.push(floatingCube); blockCount++;
+
+                             // Add spawn location on floating island top
+                             if (fh === islandHeight && islandTopMaterial !== materials.magic) {
+                                 validSpawnLocations.push({x: blockX, y: blockY + cubeSize, z: blockZ });
+                             }
+                        }
+                    }
+                }
+            }
+            console.log(`Generation Pass 1: Added ${blockCount} terrain/island blocks. Found ${validSpawnLocations.length} potential spawn locations.`);
+
+            // **Pass 2: Generate Villages**
+            console.log("Generation Pass 2: Villages");
+            let villageCount = 0;
+            for (let x = 5; x < worldWidth - 5; x++) {
+                for (let z = 5; z < worldDepth - 5; z++) {
+                    const height = heightMap[x][z];
+                    const terrainType = terrainTypeMap[x][z];
+                    if (terrainType === materials.grass || terrainType === materials.sand) {
+                        let isFlatEnough = true;
+                        const checkRadius = 3;
+                        for (let dx = -checkRadius; dx <= checkRadius; dx++) {
+                            for (let dz = -checkRadius; dz <= checkRadius; dz++) {
+                                if (x + dx >= 0 && x + dx < worldWidth && z + dz >= 0 && z + dz < worldDepth) {
+                                    if (Math.abs(heightMap[x+dx][z+dz] - height) > 2) { isFlatEnough = false; break; }
+                                } else { isFlatEnough = false; break; }
+                            }
+                            if (!isFlatEnough) break;
+                        }
+
+                        let villageNoise = simplex.noise2D(x * 0.1 + 300, z * 0.1 + 400);
+                        if (isFlatEnough && villageNoise > villageSpawnThreshold && Math.random() < villageDensity) {
+                           let structuresBuilt = buildVillage(x, z, heightMap, materials, geometries.cube);
+                           if (structuresBuilt > 0) {
+                                console.log(`Built village with ${structuresBuilt} structures near grid ${x}, ${z}`);
+                                villageCount++; x += 10; // Skip ahead
+                           }
+                        }
+                    }
+                }
+            }
+            console.log(`Generation Pass 2: Created ${villageCount} villages.`);
+
+             // **Pass 3: Spawn Mobs & BOSS**
+            console.log("Generation Pass 3: Mobs and Boss");
+            let mobsSpawned = 0;
+            isBossSpawned = false; // Reset flag
+
+            if (validSpawnLocations.length === 0) {
+                console.error("No valid spawn locations found for mobs or boss!");
+                return; // Cannot spawn anything
+            }
+
+            // Shuffle spawn locations to make placement random
+            validSpawnLocations.sort(() => Math.random() - 0.5);
+
+            for (const spawnPoint of validSpawnLocations) {
+                 const spawnX = spawnPoint.x;
+                 const spawnY = spawnPoint.y; // Already slightly above ground
+                 const spawnZ = spawnPoint.z;
+
+                 // Try to spawn the boss first
+                 if (!isBossSpawned && Math.random() < bossSpawnChance) { // Use 1.0 to guarantee if flag allows
+                     if (spawnDragonBoss(spawnX, spawnY + 1.5, spawnZ)) { // Spawn boss slightly higher
+                          isBossSpawned = true;
+                          console.log(`Spawned Dragon Boss at ${spawnX.toFixed(1)}, ${spawnY.toFixed(1)}, ${spawnZ.toFixed(1)}`);
+                          continue; // Don't spawn a regular mob here
+                     } else {
+                         console.warn("Failed to spawn boss, trying mob instead.");
+                     }
+                 }
+
+                 // Spawn regular mobs if boss didn't spawn here or is already spawned
+                 if (Math.random() < mobSpawnChance) {
+                     const mobMesh = new THREE.Mesh(geometries.mob, materials.mob);
+                     mobMesh.position.set(spawnX, spawnY - cubeSize * 0.1, spawnZ); // Adjust Y slightly for sphere base
+                     mobMesh.castShadow = true;
+                     mobMesh.userData = { type: 'mob' };
+
+                     const mobData = {
+                         mesh: mobMesh,
+                         velocity: new THREE.Vector3(),
+                         targetPosition: null,
+                         moveTimer: Math.random() * 5,
+                         state: 'idle'
+                     };
+                     mobs.push(mobData);
+                     scene.add(mobMesh);
+                     mobsSpawned++;
+                 }
+            }
+
+            // If boss *still* hasn't spawned (e.g., first location failed), try the last valid location
+            if (!isBossSpawned && validSpawnLocations.length > 0) {
+                console.warn("Boss did not spawn in initial loop, attempting spawn at last valid location.");
+                const lastSpawn = validSpawnLocations[validSpawnLocations.length - 1];
+                 if (spawnDragonBoss(lastSpawn.x, lastSpawn.y + 1.5, lastSpawn.z)) {
+                     isBossSpawned = true;
+                     console.log(`Spawned Dragon Boss at fallback location ${lastSpawn.x.toFixed(1)}, ${lastSpawn.y.toFixed(1)}, ${lastSpawn.z.toFixed(1)}`);
+                 } else {
+                     console.error("Failed to spawn boss even at fallback location.");
+                 }
+            }
+
+            console.log(`Generation Pass 3: Spawned ${mobsSpawned} mobs.`);
+            if (isBossSpawned) console.log("Dragon Boss was spawned.");
+            else console.warn("Dragon Boss FAILED to spawn.");
+            console.log(`Total world objects for collision: ${worldObjects.length}`);
+        }
+
+        // --- Spawn Dragon Boss ---
+        function spawnDragonBoss(x, y, z) {
+            if (bossData) {
+                console.warn("Attempted to spawn boss, but one already exists.");
+                return false; // Only one boss allowed
+            }
+
+            const bossMesh = new THREE.Mesh(geometries.dragonBody, materials.dragon);
+            bossMesh.position.set(x, y, z); // Use provided coordinates
+            bossMesh.castShadow = true;
+            bossMesh.userData = { type: 'boss' }; // Identify as boss
+
+            bossData = {
+                mesh: bossMesh,
+                health: bossMaxHealth,
+                maxHealth: bossMaxHealth,
+                velocity: new THREE.Vector3(),
+                targetPosition: null,
+                moveTimer: Math.random() * 3 + 1, // Moves more often
+                state: 'idle',
+                originalColor: materials.dragon.color.clone(),
+                originalEmissive: materials.dragon.emissive.clone(),
+                hitFlashTimer: 0
+            };
+
+            scene.add(bossMesh);
+            // Make health bar visible *now*
+            updateBossHealthUI();
+            if(bossHealthBar) bossHealthBar.style.display = 'block';
+
+            return true; // Success
+        }
+
+
+        // --- Village Building Functions (Unchanged) ---
+        function buildVillage(centerX, centerZ, heightMap, materials, cubeGeom) {
+             const villageRadius = 6;
+             const numHouses = Math.floor(Math.random() * 4) + 3;
+             let structuresBuilt = 0;
+             const minHouseSeparationSq = 4*4;
+             const housePositions = [];
+
+             for (let i = 0; i < numHouses; i++) {
+                 let attempts = 0; let placed = false;
+                 while (attempts < 15 && !placed) {
+                    const angle = Math.random() * Math.PI * 2;
+                    const radius = Math.random() * villageRadius;
+                    const houseX = Math.round(centerX + Math.cos(angle) * radius);
+                    const houseZ = Math.round(centerZ + Math.sin(angle) * radius);
+
+                     if (houseX >= 1 && houseX < worldWidth - 1 && houseZ >= 1 && houseZ < worldDepth - 1) {
+                         const groundY = heightMap[houseX][houseZ];
+                         if (Math.abs(groundY - heightMap[centerX][centerZ]) <= 3 &&
+                             Math.abs(heightMap[houseX+1][houseZ] - groundY) <= 1 &&
+                             Math.abs(heightMap[houseX-1][houseZ] - groundY) <= 1 &&
+                             Math.abs(heightMap[houseX][houseZ+1] - groundY) <= 1 &&
+                             Math.abs(heightMap[houseX][houseZ-1] - groundY) <= 1) {
+                             let tooClose = false;
+                             const currentPos = new THREE.Vector2(houseX, houseZ);
+                             for(const pos of housePositions) { if(currentPos.distanceToSquared(pos) < minHouseSeparationSq) { tooClose = true; break; } }
+                             if (!tooClose) {
+                                 buildHouse(houseX, houseZ, groundY, materials, cubeGeom);
+                                 housePositions.push(currentPos); structuresBuilt++; placed = true;
+                             }
+                         }
+                     }
+                     attempts++;
+                }
+             }
+             return structuresBuilt;
+        }
+        function buildHouse(x, z, groundHeight, materials, cubeGeom) {
+            const houseWidth = Math.floor(Math.random() * 2) + 3;
+            const houseDepth = Math.floor(Math.random() * 2) + 3;
+            const houseHeight = Math.floor(Math.random() * 2) + 2;
+            const worldX = (x - worldWidth / 2) * cubeSize;
+            const worldZ = (z - worldDepth / 2) * cubeSize;
+            const baseY = groundHeight * cubeSize - heightScale / 2;
+
+            // Floor
+             for (let dx = 0; dx < houseWidth; dx++) { for (let dz = 0; dz < houseDepth; dz++) {
+                 const floorBlock = new THREE.Mesh(cubeGeom, materials.wood);
+                 floorBlock.position.set(worldX + dx * cubeSize, baseY + cubeSize * 0.01, worldZ + dz * cubeSize);
+                 floorBlock.castShadow = true; floorBlock.receiveShadow = true; floorBlock.userData = { type: 'structure' };
+                 scene.add(floorBlock); worldObjects.push(floorBlock);
+             } }
+            // Walls
+            const wallBaseY = baseY + cubeSize;
+            for (let dx = 0; dx < houseWidth; dx++) { for (let dz = 0; dz < houseDepth; dz++) { if (dx === 0 || dx === houseWidth - 1 || dz === 0 || dz === houseDepth - 1) {
+                for (let dy = 0; dy < houseHeight; dy++) { let isDoorSpace = (dx === Math.floor(houseWidth / 2) && dz === 0 && (dy === 0 || dy === 1)); if (!isDoorSpace) {
+                    const wallBlock = new THREE.Mesh(cubeGeom, materials.wood);
+                    wallBlock.position.set(worldX + dx * cubeSize, wallBaseY + dy * cubeSize, worldZ + dz * cubeSize);
+                    wallBlock.castShadow = true; wallBlock.receiveShadow = true; wallBlock.userData = { type: 'structure' };
+                    scene.add(wallBlock); worldObjects.push(wallBlock);
+                }}
+            }}}
+            // Roof
+             const roofBaseY = wallBaseY + houseHeight * cubeSize;
+             for (let dz = -1; dz <= houseDepth; dz++) { const peakDist = Math.min(dz + 1, houseDepth - dz); const roofHeightOffset = Math.max(0, Math.floor((Math.min(houseWidth, houseDepth) / 2) - peakDist));
+                for (let dx = -1; dx <= houseWidth; dx++) { const roofBlockY = roofBaseY + roofHeightOffset * cubeSize; if (dx >= -1 && dx <= houseWidth && dz >= -1 && dz <= houseDepth) {
+                    const isGableEdge = (dx === -1 || dx === houseWidth) && (dz >= 0 && dz < houseDepth); const isMainRoof = (dx >= 0 && dx < houseWidth); if(isMainRoof || isGableEdge) {
+                         const blockMaterial = isMainRoof ? materials.roof : materials.wood;
+                         const roofBlock = new THREE.Mesh(cubeGeom, blockMaterial);
+                         roofBlock.position.set(worldX + dx * cubeSize, roofBlockY, worldZ + dz * cubeSize);
+                         roofBlock.castShadow = true; roofBlock.receiveShadow = true; roofBlock.userData = { type: 'structure' };
+                         scene.add(roofBlock); worldObjects.push(roofBlock);
+                         if (isGableEdge) { for (let fillY = roofBlockY - cubeSize; fillY >= roofBaseY; fillY -= cubeSize) {
+                             const fillBlock = new THREE.Mesh(cubeGeom, materials.wood); fillBlock.position.set(worldX + dx * cubeSize, fillY, worldZ + dz * cubeSize);
+                             fillBlock.castShadow = true; fillBlock.receiveShadow = true; fillBlock.userData = { type: 'structure' }; scene.add(fillBlock); worldObjects.push(fillBlock);
+                         }}
+                    }}
+                 }}
+        }
+
+        // --- Set Initial Player Position (Unchanged, but uses heightMap/terrainTypeMap) ---
+        function setInitialPlayerPosition() {
+            console.log("Searching for initial player position...");
+            let startX = Math.floor(worldWidth / 2); let startZ = Math.floor(worldDepth / 2);
+            let foundStart = false; const searchRadius = 15; let bestPos = null; let minHeightDiff = Infinity;
+            for (let r = 0; r < searchRadius && !foundStart; r++) { for (let dx = -r; dx <= r; dx++) { for (let dz = -r; dz <=r; dz++) {
+                if (r > 0 && Math.abs(dx) < r && Math.abs(dz) < r) continue; // Only check perimeter
+                let checkX = startX + dx; let checkZ = startZ + dz;
+                 if (checkX >= 1 && checkX < worldWidth - 1 && checkZ >= 1 && checkZ < worldDepth - 1) {
+                    const terrainType = terrainTypeMap[checkX][checkZ];
+                    if (terrainType === materials.grass || terrainType === materials.sand) {
+                        let maxH = -Infinity, minH = Infinity; let currentHeight = heightMap[checkX][checkZ]; let validNeighbours = true;
+                        for(let nx = -1; nx <= 1; nx++) { for(let nz = -1; nz <= 1; nz++) {
+                            let nX = checkX+nx; let nZ = checkZ+nz; if(nX >= 0 && nX < worldWidth && nZ >= 0 && nZ < worldDepth) {
+                                let h = heightMap[nX][nZ]; if (terrainTypeMap[nX][nZ] === materials.water) { validNeighbours = false; break; } maxH = Math.max(maxH, h); minH = Math.min(minH, h);
+                            } else { validNeighbours = false; break; }
+                        } if(!validNeighbours) break; }
+                        if (validNeighbours && (maxH - minH <= 1)) {
+                             const groundY = currentHeight * cubeSize - heightScale / 2;
+                             const potentialPos = new THREE.Vector3( (checkX - worldWidth / 2) * cubeSize, groundY + playerHeight, (checkZ - worldDepth / 2) * cubeSize );
+                             let heightDiff = Math.abs(groundY); if (heightDiff < minHeightDiff) { minHeightDiff = heightDiff; bestPos = potentialPos; }
+                             if (r < searchRadius / 2) foundStart = true; // Prioritize close spots
+                        } } }
+            } if(foundStart && bestPos) break; } }
+            if (bestPos) { controls.getObject().position.copy(bestPos); console.log(`Found suitable start position near grid ${startX + Math.round(bestPos.x/cubeSize)}, ${startZ + Math.round(bestPos.z/cubeSize)}`); }
+            else { const fallbackY = heightMap[startX][startZ] * cubeSize - heightScale / 2; controls.getObject().position.set( (startX - worldWidth / 2) * cubeSize, fallbackY + playerHeight + 5, (startZ - worldDepth / 2) * cubeSize ); console.warn("Suitable starting position not found, using fallback near center."); }
+        }
+
+        // --- Particle Effects (Unchanged) ---
+        function generateParticles() {
+             const particleCount = 8000; const particles = new THREE.BufferGeometry(); const positions = []; const colors = []; const color = new THREE.Color();
+             const rangeX = worldWidth * cubeSize * 1.8; const rangeY = heightScale * 2.5; const rangeZ = worldDepth * cubeSize * 1.8;
+             for (let i = 0; i < particleCount; i++) {
+                 const x = THREE.MathUtils.randFloatSpread(rangeX); const y = THREE.MathUtils.randFloat(-heightScale, rangeY - heightScale/2); const z = THREE.MathUtils.randFloatSpread(rangeZ); positions.push(x, y, z);
+                 const randomColor = Math.random(); if (randomColor < 0.3) color.setHSL(0.6, 0.9, 0.85); else if (randomColor < 0.6) color.setHSL(0.15, 0.9, 0.85); else if (randomColor < 0.8) color.setHSL(0.8, 0.9, 0.85); else color.setHSL(0, 0, 1.0); colors.push(color.r, color.g, color.b);
+             } particles.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3)); particles.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+             const particleMaterial = new THREE.PointsMaterial({ size: 0.25, vertexColors: true, transparent: true, opacity: 0.8, sizeAttenuation: true, blending: THREE.AdditiveBlending });
+             particleSystem = new THREE.Points(particles, particleMaterial); scene.add(particleSystem);
+        }
+
+        // --- Event Handlers ---
+        function onWindowResize() {
+            if (!camera || !renderer) return;
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+        function onKeyDown(event) {
+            switch (event.code) {
+                case 'ArrowUp': case 'KeyW': moveForward = true; break;
+                case 'ArrowLeft': case 'KeyA': moveLeft = true; break;
+                case 'ArrowDown': case 'KeyS': moveBackward = true; break;
+                case 'ArrowRight': case 'KeyD': moveRight = true; break;
+                case 'Space': if (canJump && playerOnGround) { playerVelocity.y = jumpVelocity; canJump = false; playerOnGround = false; } break;
+            }
+        }
+        function onKeyUp(event) {
+            switch (event.code) {
+                case 'ArrowUp': case 'KeyW': moveForward = false; break;
+                case 'ArrowLeft': case 'KeyA': moveLeft = false; break;
+                case 'ArrowDown': case 'KeyS': moveBackward = false; break;
+                case 'ArrowRight': case 'KeyD': moveRight = false; break;
+            }
+        }
+
+        // --- Interaction & Shooting ---
+        function onInteractClick(event) {
+             if (!controls || !controls.isLocked || playerHealth <= 0) return; // Ensure controls locked and player alive
+
+             // Check for portal interaction first
+            shootingRaycaster.setFromCamera(new THREE.Vector2(0, 0), camera); // Use shared raycaster
+            const portalIntersects = shootingRaycaster.intersectObjects(interactiveObjects);
+             if (portalIntersects.length > 0 && portalIntersects[0].distance < 5) {
+                const clickedObject = portalIntersects[0].object;
+                if (clickedObject.userData.isPortal) {
+                    activatePortalEffect(clickedObject);
+                    return; // Don't shoot if activating portal
+                }
+            }
+
+             // --- SHOOTING LOGIC ---
+             // Raycast to find targets (Boss, Mobs)
+             shootingRaycaster.far = gunRange;
+             const shootIntersects = shootingRaycaster.intersectObjects(scene.children, true); // Check all scene objects
+
+             let hitTarget = false;
+             for (const intersect of shootIntersects) {
+                 const objectHit = intersect.object;
+
+                 // Check if BOSS was hit
+                 if (bossData && objectHit === bossData.mesh) {
+                     console.log(`Hit Dragon! Distance: ${intersect.distance.toFixed(1)}`);
+                     dealBossDamage(gunDamage);
+                     showBossHitEffect(); // Show visual feedback
+                     hitTarget = true;
+                     break; // Stop checking after hitting the boss
+                 }
+
+                 // Check if a regular MOB was hit (optional: damage mobs too)
+                 /*
+                 const mobIndex = mobs.findIndex(m => m.mesh === objectHit);
+                 if (mobIndex !== -1) {
+                     console.log(`Hit Mob ${mobIndex}!`);
+                     // Optional: Add health to mobs and damage them
+                     // mobs[mobIndex].health -= gunDamage;
+                     // if (mobs[mobIndex].health <= 0) removeMob(mobIndex);
+                     hitTarget = true;
+                     break;
+                 }
+                 */
+
+                  // If we hit something solid that isn't the boss/mob, stop the bullet trace here
+                  if(worldObjects.includes(objectHit) || objectHit.userData?.type === 'structure') {
+                       // console.log("Bullet hit terrain/structure.");
+                       break; // Ray stops at the first solid object
+                  }
+             }
+
+            // TODO: Add visual effect for shooting (e.g., muzzle flash, tracer)
+            if (!hitTarget) {
+                // console.log("Shot missed or hit terrain.");
+            }
+        }
+
+        // --- Portal Activation/Fade (Unchanged) ---
+        function activatePortalEffect(portalObject) {
+             const originalColorHex = portalObject.userData.originalColor; portalObject.material.color.set(0xffffff); portalObject.material.emissive.set(0xffffff); portalObject.material.emissiveIntensity = 8;
+             setTimeout(() => { if(portalObject.material) { portalObject.material.color.setHex(originalColorHex); portalObject.material.emissive.set(0xaaaa00); portalObject.material.emissiveIntensity = 2.5; } }, 150);
+             const originalBg = scene.background.clone(); const originalFog = scene.fog ? scene.fog.clone() : null; const originalAmbient = ambientLight.color.clone();
+             const targetBg = new THREE.Color(Math.random() * 0x660066 + 0x220022); const targetFogColor = targetBg.clone(); const targetAmbient = targetBg.clone().multiplyScalar(0.6);
+             const duration = 1.5; let elapsed = 0; const intervalId = `portalEffect_${Date.now()}`;
+             window[intervalId] = setInterval(() => { elapsed += 0.05; const t = Math.min(1, elapsed / duration); scene.background.lerpColors(originalBg, targetBg, t); if(scene.fog && originalFog) scene.fog.color.lerpColors(originalFog.color, targetFogColor, t); ambientLight.color.lerpColors(originalAmbient, targetAmbient, t); if (t >= 1) { clearInterval(window[intervalId]); delete window[intervalId]; setTimeout(() => fadeBackFromPortal(originalBg, originalFog, originalAmbient), 1000); } }, 50);
+        }
+        function fadeBackFromPortal(originalBg, originalFog, originalAmbient) {
+             const duration = 2.0; let elapsed = 0; const currentBg = scene.background.clone(); const currentFogColor = scene.fog ? scene.fog.color.clone() : null; const currentAmbient = ambientLight.color.clone();
+             const intervalId = `portalFadeBack_${Date.now()}`;
+             window[intervalId] = setInterval(() => { elapsed += 0.05; const t = Math.min(1, elapsed / duration); scene.background.lerpColors(currentBg, originalBg, t); if(scene.fog && originalFog && currentFogColor) scene.fog.color.lerpColors(currentFogColor, originalFog.color, t); ambientLight.color.lerpColors(currentAmbient, originalAmbient, t); if (t >= 1) { clearInterval(window[intervalId]); delete window[intervalId]; } }, 50);
+        }
+
+        // --- Health & Damage Logic ---
+        function takePlayerDamage(amount) {
+            if (playerHealth <= 0 || playerDamageCooldown > 0) return; // Invincible or already dead
+
+            playerHealth -= amount;
+            playerDamageCooldown = playerDamageCooldownTime; // Start cooldown
+            console.log(`Player took ${amount} damage. Health: ${playerHealth}/${playerMaxHealth}`);
+
+            // TODO: Add visual/audio feedback for taking damage (screen flash?)
+
+            if (playerHealth <= 0) {
+                playerHealth = 0;
+                handlePlayerDeath();
+            }
+            updatePlayerHealthUI();
+        }
+
+        function dealBossDamage(amount) {
+            if (!bossData || bossData.health <= 0) return; // Boss doesn't exist or is dead
+
+            bossData.health -= amount;
+            console.log(`Dealt ${amount} damage to Dragon. Health: ${bossData.health}/${bossData.maxHealth}`);
+
+            if (bossData.health <= 0) {
+                bossData.health = 0;
+                handleBossDeath();
+            }
+             // Update UI immediately for responsiveness after dealing damage
+             updateBossHealthUI();
+        }
+
+        function handlePlayerDeath() {
+            console.log("Player has been defeated!");
+            // Show blocker with a death message
+            if (blocker && instructions) {
+                 blocker.style.display = 'flex';
+                 instructions.innerHTML = `<h2>You Died!</h2><p>The Dragon defeated you.</p><p>(ESC to release mouse, refresh to retry)</p>`;
+                 instructions.style.display = '';
+                 crosshair.style.display = 'none';
+                 if(controls) controls.unlock(); // Force unlock
+            }
+            // Optionally: Stop player movement? (already handled by lock)
+        }
+
+        function handleBossDeath() {
+            console.log("Dragon has been defeated!");
+            if (!bossData || !bossData.mesh) return;
+
+            // Remove boss mesh from scene
+            scene.remove(bossData.mesh);
+            // Dispose geometry/material if necessary
+            bossData.mesh.geometry.dispose();
+            bossData.mesh.material.dispose();
+
+            bossData = null; // Clear boss data
+            isBossSpawned = false; // Allow potential respawn if game logic supports it
+
+            // Hide health bar
+            updateBossHealthUI();
+
+            // Show victory message (optional)
+            if (blocker && instructions && playerHealth > 0) { // Only show if player is alive
+                 blocker.style.display = 'flex';
+                 instructions.innerHTML = `<h2>Victory!</h2><p>You defeated the Dragon!</p><p>(ESC to release mouse, continue exploring or refresh)</p>`;
+                 instructions.style.display = '';
+                 crosshair.style.display = 'none';
+                 if(controls) controls.unlock();
+            }
+        }
+
+        // --- Visual Hit Effect for Boss ---
+        function showBossHitEffect() {
+            if (!bossData || bossData.hitFlashTimer > 0) return; // Already flashing or no boss
+
+            const flashDuration = 0.15; // seconds
+            bossData.hitFlashTimer = flashDuration;
+
+            // Store original if not already stored (redundant with current setup, but safe)
+            if (!bossData.originalColor) bossData.originalColor = bossData.mesh.material.color.clone();
+            if (!bossData.originalEmissive) bossData.originalEmissive = bossData.mesh.material.emissive.clone();
+
+            // Set to bright flash color
+            bossData.mesh.material.color.set(0xffffff); // White
+            bossData.mesh.material.emissive.set(0xffdddd); // Bright reddish emissive
+            bossData.mesh.material.needsUpdate = true; // Important for material change
+        }
+
+        // Function to revert boss color after flash (called in animate)
+        function revertBossColor() {
+             if (!bossData || !bossData.mesh || !bossData.mesh.material) return;
+             bossData.mesh.material.color.copy(bossData.originalColor);
+             bossData.mesh.material.emissive.copy(bossData.originalEmissive);
+             bossData.mesh.material.needsUpdate = true;
+        }
+
+
+        // --- Update UI Elements ---
+        function updatePlayerHealthUI() {
+            if (!playerHealthFill || !playerHealthText) return;
+            const healthPercent = (playerHealth / playerMaxHealth) * 100;
+            playerHealthFill.style.width = `${healthPercent}%`;
+            playerHealthText.textContent = `Player HP: ${Math.max(0, Math.round(playerHealth))}/${playerMaxHealth}`;
+        }
+
+        function updateBossHealthUI() {
+            if (!bossHealthBar || !bossHealthFill || !bossHealthText) return;
+
+            if (bossData && bossData.health > 0) {
+                bossHealthBar.style.display = 'block'; // Show bar
+                const healthPercent = (bossData.health / bossData.maxHealth) * 100;
+                bossHealthFill.style.width = `${healthPercent}%`;
+                bossHealthText.textContent = `Dragon HP: ${Math.round(bossData.health)}/${bossData.maxHealth}`;
+            } else {
+                bossHealthBar.style.display = 'none'; // Hide bar if no boss or dead boss
+            }
+        }
+
+        // --- Update Mobs and Boss ---
+        function updateEntities(delta) {
+            const mobMoveSpeed = 2.0;
+            const bossMoveSpeed = 3.5; // Boss moves faster
+            const detectionRadius = 15.0;
+            const bossDetectionRadius = 40.0; // Boss detects player from further away
+            const playerPos = controls.getObject().position;
+
+             // --- Update Boss ---
+             if (bossData && bossData.health > 0) {
+                 const boss = bossData;
+                 const bossPos = boss.mesh.position;
+
+                 // Hit flash timer
+                 if (boss.hitFlashTimer > 0) {
+                     boss.hitFlashTimer -= delta;
+                     if (boss.hitFlashTimer <= 0) {
+                         revertBossColor(); // Revert color when timer ends
+                     }
+                 }
+
+                 // Player detection and chase logic
+                 const distToPlayerSq = bossPos.distanceToSquared(playerPos);
+                 let isChasing = false;
+                 if (distToPlayerSq < bossDetectionRadius * bossDetectionRadius) {
+                      // Target player directly
+                      boss.targetPosition = playerPos.clone();
+                      boss.state = 'chasing';
+                      isChasing = true;
+                      // console.log("Boss is chasing!"); // DEBUG
+                 }
+
+                 // Wandering logic (if not chasing)
+                 boss.moveTimer -= delta;
+                 if (!isChasing && boss.state !== 'chasing' && boss.moveTimer <= 0) {
+                     boss.state = 'wandering';
+                     const angle = Math.random() * Math.PI * 2;
+                     const distance = Math.random() * detectionRadius * 1.5; // Wander a bit further
+                     const targetX = bossPos.x + Math.cos(angle) * distance;
+                     const targetZ = bossPos.z + Math.sin(angle) * distance;
+                     // Simple ground height guess (can be improved with raycast)
+                     boss.targetPosition = new THREE.Vector3(targetX, bossPos.y, targetZ);
+                     boss.moveTimer = Math.random() * 5 + 2; // Reset wander timer
+                 } else if (!isChasing && boss.state === 'chasing') {
+                     // Player went out of range, stop chasing
+                     boss.state = 'idle';
+                     boss.targetPosition = null;
+                     boss.velocity.set(0,0,0);
+                     boss.moveTimer = Math.random() * 3 + 1; // Start idle timer
+                 }
+
+                 // Movement execution
+                 if ((boss.state === 'wandering' || boss.state === 'chasing') && boss.targetPosition) {
+                     const directionToTarget = boss.targetPosition.clone().sub(bossPos);
+                     // Boss ignores Y difference for basic horizontal movement/chasing
+                     directionToTarget.y = 0;
+                     const distanceToTarget = directionToTarget.length();
+                     const speed = (boss.state === 'chasing') ? bossMoveSpeed * 1.2 : bossMoveSpeed; // Faster when chasing
+
+                     if (distanceToTarget > 1.0) { // Stop threshold
+                         directionToTarget.normalize();
+                         boss.velocity.x = directionToTarget.x * speed;
+                         boss.velocity.z = directionToTarget.z * speed;
+                     } else if (boss.state === 'wandering') {
+                         // Reached wander target
+                         boss.state = 'idle';
+                         boss.moveTimer = Math.random() * 5 + 2;
+                         boss.targetPosition = null;
+                         boss.velocity.set(0, 0, 0);
+                     } else {
+                         // Reached player (or close enough while chasing) - stop moving horizontally
+                         boss.velocity.x = 0;
+                         boss.velocity.z = 0;
+                     }
+                 } else {
+                      // Apply friction/damping when idle or no target
+                      boss.velocity.x *= (1 - 10 * delta);
+                      boss.velocity.z *= (1 - 10 * delta);
+                 }
+
+                 // Basic gravity / ground check for Boss
+                 let bossDownRay = new THREE.Raycaster(bossPos.clone().add(new THREE.Vector3(0, 0.1, 0)), new THREE.Vector3(0, -1, 0), 0, 5); // Check further down
+                 let groundIntersects = bossDownRay.intersectObjects(worldObjects);
+                  if (groundIntersects.length > 0) {
+                     const groundY = groundIntersects[0].point.y;
+                     const requiredY = groundY + 2.5 * cubeSize; // Boss radius
+                     if(bossPos.y < requiredY + 0.2) {
+                         bossPos.y = requiredY;
+                         boss.velocity.y = 0;
+                     } else { boss.velocity.y -= gravity * delta * 0.8; }
+                 } else { boss.velocity.y -= gravity * delta * 0.8; } // Apply gravity if no ground detected
+
+                 // Update boss position
+                 bossPos.x += boss.velocity.x * delta;
+                 bossPos.y += boss.velocity.y * delta; // Apply vertical velocity
+                 bossPos.z += boss.velocity.z * delta;
+
+                 // Check for player damage from Boss proximity
+                 if (playerDamageCooldown <= 0 && distToPlayerSq < bossContactRadiusSq) {
+                      takePlayerDamage(bossContactDamage);
+                 }
+             } // End Boss Update
+
+
+             // --- Update Regular Mobs ---
+             mobs.forEach((mob, index) => {
+                 if (!mob || !mob.mesh) return; // Skip corrupted mobs
+                 const mobPos = mob.mesh.position;
+
+                 // Wandering logic (same as before)
+                 mob.moveTimer -= delta;
+                 if (mob.state === 'idle' && mob.moveTimer <= 0) {
+                     mob.state = 'wandering';
+                     const angle = Math.random() * Math.PI * 2;
+                     const distance = Math.random() * detectionRadius;
+                     mob.targetPosition = new THREE.Vector3(mobPos.x + Math.cos(angle) * distance, mobPos.y, mobPos.z + Math.sin(angle) * distance);
+                 }
+
+                 if (mob.state === 'wandering' && mob.targetPosition) {
+                     const directionToTarget = mob.targetPosition.clone().sub(mobPos); directionToTarget.y = 0;
+                     const distanceToTarget = directionToTarget.length();
+                     if (distanceToTarget > 0.5) {
+                         directionToTarget.normalize();
+                         mob.velocity.x = directionToTarget.x * mobMoveSpeed; mob.velocity.z = directionToTarget.z * mobMoveSpeed;
+                     } else {
+                         mob.state = 'idle'; mob.moveTimer = Math.random() * 8 + 2; mob.targetPosition = null; mob.velocity.set(0, 0, 0);
+                     }
+                 } else { mob.velocity.x *= (1 - 15 * delta); mob.velocity.z *= (1 - 15 * delta); }
+
+                 // Mob Gravity / Ground Check
+                 let mobDownRay = new THREE.Raycaster(mobPos.clone().add(new THREE.Vector3(0, 0.1, 0)), new THREE.Vector3(0, -1, 0), 0, 1.5);
+                 let mobGroundIntersects = mobDownRay.intersectObjects(worldObjects);
+                  if (mobGroundIntersects.length > 0) {
+                     const groundY = mobGroundIntersects[0].point.y; const requiredY = groundY + cubeSize * 0.4;
+                     if(mobPos.y < requiredY + 0.1) { mobPos.y = requiredY; mob.velocity.y = 0; }
+                     else { mob.velocity.y -= gravity * delta * 0.8; }
+                 } else { mob.velocity.y -= gravity * delta * 0.8; }
+
+                 // Update mob position
+                 mobPos.x += mob.velocity.x * delta;
+                 mobPos.y += mob.velocity.y * delta;
+                 mobPos.z += mob.velocity.z * delta;
+             });
+         }
+
+        // --- Collision Detection (Mostly Unchanged, using worldObjects) ---
+        function checkCollisions(delta) {
+            if(!controls || playerHealth <= 0) return; // Skip if controls missing or player dead
+
+            const playerPosition = controls.getObject().position;
+            playerOnGround = false;
+
+            // 1. Downward Collision
+            downRaycaster.ray.origin.copy(playerPosition); downRaycaster.ray.origin.y += 0.01;
+            downRaycaster.far = playerHeight / 2 + 0.15;
+            const groundIntersects = downRaycaster.intersectObjects(worldObjects);
+            if (groundIntersects.length > 0) {
+                 const groundY = groundIntersects[0].point.y;
+                 if (playerPosition.y <= groundY + playerHeight / 2 + 0.1) {
+                     playerOnGround = true; canJump = true;
+                     if (playerVelocity.y < 0) { playerVelocity.y = 0; playerPosition.y = groundY + playerHeight / 2; }
+                 }
+            }
+
+             // Apply gravity
+             if (!playerOnGround) { playerVelocity.y -= gravity * delta; canJump = false; }
+
+            // 2. Horizontal Collisions
+            playerDirection.z = Number(moveForward) - Number(moveBackward); playerDirection.x = Number(moveRight) - Number(moveLeft); playerDirection.normalize();
+             const forwardVel = new THREE.Vector3(); const rightVel = new THREE.Vector3(); camera.getWorldDirection(forwardVel); forwardVel.y = 0; forwardVel.normalize(); rightVel.copy(forwardVel).cross(camera.up);
+             let currentVelocityX = 0; let currentVelocityZ = 0;
+             if (moveForward || moveBackward) { currentVelocityX += forwardVel.x * playerDirection.z * playerSpeed; currentVelocityZ += forwardVel.z * playerDirection.z * playerSpeed; }
+             if (moveLeft || moveRight) { currentVelocityX += rightVel.x * playerDirection.x * playerSpeed; currentVelocityZ += rightVel.z * playerDirection.x * playerSpeed; }
+             let moveX = currentVelocityX * delta; let moveZ = currentVelocityZ * delta;
+
+             // Check X
+            if (moveX !== 0) {
+                collisionRaycaster.set(playerPosition, new THREE.Vector3(Math.sign(moveX), 0, 0)); collisionRaycaster.far = playerRadius + Math.abs(moveX);
+                const xIntersects = collisionRaycaster.intersectObjects(worldObjects); if (xIntersects.length > 0) { moveX = Math.sign(moveX) * (xIntersects[0].distance - playerRadius - 0.01); }
+            }
+            // Check Z
+            const tempCheckPosition = playerPosition.clone(); tempCheckPosition.x += moveX;
+            if (moveZ !== 0) {
+                collisionRaycaster.set(tempCheckPosition, new THREE.Vector3(0, 0, Math.sign(moveZ))); collisionRaycaster.far = playerRadius + Math.abs(moveZ);
+                const zIntersects = collisionRaycaster.intersectObjects(worldObjects); if (zIntersects.length > 0) { moveZ = Math.sign(moveZ) * (zIntersects[0].distance - playerRadius - 0.01); }
+            }
+             controls.getObject().position.x += moveX; controls.getObject().position.z += moveZ;
+
+            // 3. Head collision
+             if (playerVelocity.y > 0) {
+                 collisionRaycaster.set(playerPosition, new THREE.Vector3(0, 1, 0)); collisionRaycaster.far = playerHeight / 2 + 0.1;
+                 const headIntersects = collisionRaycaster.intersectObjects(worldObjects); if (headIntersects.length > 0) { playerVelocity.y = 0; playerPosition.y = headIntersects[0].point.y - playerHeight / 2 - 0.01; }
+             }
+
+             // Apply vertical velocity
+             controls.getObject().position.y += playerVelocity.y * delta;
+        }
+
+
+        // --- Animation Loop ---
+        let lastLogTime = 0;
+        function animate() {
+            try { requestAnimationFrame(animate); }
+            catch(e) { console.error("Error requesting next frame:", e); setTimeout(animate, 1000); return; }
+
+            const delta = Math.min(clock.getDelta(), 0.1);
+            const elapsedTime = clock.getElapsedTime();
+            const now = performance.now(); const logThrottle = 1000; let shouldLog = (now - lastLogTime > logThrottle); if(shouldLog) lastLogTime = now;
+
+            // Update Player Damage Cooldown
+            if (playerDamageCooldown > 0) {
+                playerDamageCooldown -= delta;
+            }
+
+            if (controls && controls.isLocked === true && playerHealth > 0) {
+                checkCollisions(delta);
+
+                // Fall check
+                if (controls.getObject().position.y < -50) {
+                    console.warn("Player fell out of world.");
+                    takePlayerDamage(playerMaxHealth * 2); // Instant death if falling out
+                    // Position reset will happen via death handler or next frame
+                }
+            } else if (playerHealth <= 0 && controls.isLocked) {
+                 // If player is dead but somehow controls are still locked, force unlock
+                 controls.unlock();
+            }
+
+
+            // Update Mobs & Boss
+            updateEntities(delta);
+
+
+            // Animate dynamic lights
+            const lightRadius = worldWidth * cubeSize * 0.3;
+            if(pointLight1) { pointLight1.position.x = Math.sin(elapsedTime * 0.6) * lightRadius + worldWidth/4 * cubeSize * Math.cos(elapsedTime * 0.1); pointLight1.position.z = Math.cos(elapsedTime * 0.4) * lightRadius + worldDepth/4 * cubeSize * Math.sin(elapsedTime * 0.15); pointLight1.position.y = heightScale + Math.sin(elapsedTime * 0.8) * 8 + 10; }
+            if(pointLight2) { pointLight2.position.x = Math.cos(elapsedTime * 0.5) * lightRadius + worldWidth*3/4 * cubeSize * Math.sin(elapsedTime * 0.12); pointLight2.position.z = Math.sin(elapsedTime * 0.7) * lightRadius + worldDepth*3/4 * cubeSize * Math.cos(elapsedTime * 0.08); pointLight2.position.y = heightScale + Math.cos(elapsedTime * 0.9) * 10 + 15; }
+
+            // Animate particles
+            if (particleSystem) { particleSystem.rotation.y = elapsedTime * 0.03; }
+
+            // Render Scene
+             if(renderer && scene && camera) { renderer.render(scene, camera); }
+             else { if (shouldLog) console.warn("Renderer, Scene or Camera missing in animate loop!"); }
+        }
+
+        // --- Start ---
+        try { setTimeout(init, 50); }
+        catch(error) {
+            console.error("Critical error during initialization setup:", error);
+            document.body.innerHTML = `<h1 style="color:red; text-align:center; margin-top: 50px;">Fatal Error Initializing Application. Check Console (F12).</h1><pre style="color:white; background: #333; padding: 10px; border-radius: 5px;">${error.stack}</pre>`;
+            const loading = document.getElementById('loading'); const blocker = document.getElementById('blocker'); if(loading) loading.style.display = 'none'; if(blocker) blocker.style.display = 'none';
+        }
+
+    </script>
+</body>
+</html>
